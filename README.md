@@ -1,4 +1,8 @@
-# Gym-Styled UR5 arm with Robotiq-85 / 140 gripper in PyBullet simulator
+# Gym-Styled Kinova arm with Robotiq 2f85 gripper
+
+Originally forked off of
+[ElectronicElephant's UR5 package](https://github.com/ElectronicElephant/pybullet_ur5_robotiq)
+,heavily adapted for my own purposes.
 
 *Probably the best one among all GitHub repos.*
 
