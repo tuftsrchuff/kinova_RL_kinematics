@@ -1,34 +1,37 @@
 import time
-import math
-import random
 
 import numpy as np
 import pybullet as p
 import pybullet_data
+from robot import KinovaRobotiq85
 
-from utilities import Models, Camera
-from collections import namedtuple
-from attrdict import AttrDict
+from utilities import Models
+from task import Task
 from tqdm import tqdm
+import gym
 
 
 class FailToReachTargetError(RuntimeError):
     pass
 
 
-class ClutteredPushGrasp:
+class EmptyScene(gym.Env):
 
-    SIMULATION_STEP_DELAY = 1 / 240.
+    SIMULATION_STEP_DELAY = 1 / 240.0
 
-    def __init__(self, robot, models: Models, camera=None, vis=False) -> None:
+    def __init__(
+        self, robot: KinovaRobotiq85, models: Models, camera=None, vis=False
+    ) -> None:
+        super().__init__()
         self.robot = robot
+        self.models = models
         self.vis = vis
-        if self.vis:
-            self.p_bar = tqdm(ncols=0, disable=False)
         self.camera = camera
+        self.steps = 0
 
         # define environment
         self.physicsClient = p.connect(p.GUI if self.vis else p.DIRECT)
+        p.setTimeStep(0.01)
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
         p.setGravity(0, 0, -10)
         self.planeID = p.loadURDF("plane.urdf")
@@ -36,102 +39,112 @@ class ClutteredPushGrasp:
         self.robot.load()
         self.robot.step_simulation = self.step_simulation
 
-        # custom sliders to tune parameters (name of the parameter,range,initial value)
-        self.xin = p.addUserDebugParameter("x", -0.224, 0.224, 0)
-        self.yin = p.addUserDebugParameter("y", -0.224, 0.224, 0)
-        self.zin = p.addUserDebugParameter("z", 0, 1., 0.5)
-        self.rollId = p.addUserDebugParameter("roll", -3.14, 3.14, 0)
-        self.pitchId = p.addUserDebugParameter("pitch", -3.14, 3.14, np.pi/2)
-        self.yawId = p.addUserDebugParameter("yaw", -np.pi/2, np.pi/2, np.pi/2)
-        self.gripper_opening_length_control = p.addUserDebugParameter("gripper_opening_length", 0, 0.085, 0.04)
+        self.joint_debug_params = []
+        self.gripper_opening_length_control = None
+        if self.vis:
+            self.joint_debug_params = [
+                p.addUserDebugParameter(
+                    "joint_{}".format(i),
+                    -p.getJointInfo(self.robot.id, i)[11],
+                    p.getJointInfo(self.robot.id, i)[11],
+                    0,
+                )
+                for i in self.robot.arm_dof_ids
+            ]
 
-        self.boxID = p.loadURDF("./urdf/skew-box-button.urdf",
-                                [0.0, 0.0, 0.0],
-                                # p.getQuaternionFromEuler([0, 1.5706453, 0]),
-                                p.getQuaternionFromEuler([0, 0, 0]),
-                                useFixedBase=True,
-                                flags=p.URDF_MERGE_FIXED_LINKS | p.URDF_USE_SELF_COLLISION)
+            self.gripper_opening_length_control = p.addUserDebugParameter(
+                "gripper_opening_length", 0, 0.085, 0.04
+            )
 
-        # For calculating the reward
-        self.box_opened = False
-        self.btn_pressed = False
-        self.box_closed = False
+        self.reward = 0
+        self.task = Task()
+
+        self.observation_space = gym.spaces.Box(
+            low=-np.pi, high=np.pi, shape=(8,), dtype=np.float32
+        )
+        # our action space is to select a specific joint and move that joint to the next point.
+        # we can move a joint in either direction, and there are 8 joints, so we have 16 possible actions.
+        self.base_actions = 16
+        self.action_space = gym.spaces.Discrete(self.base_actions + self.robot.extra_action_count)
+
+    def set_task(self, task: Task):
+        self.task = task
 
     def step_simulation(self):
         """
         Hook p.stepSimulation()
         """
         p.stepSimulation()
-        if self.vis:
-            time.sleep(self.SIMULATION_STEP_DELAY)
-            self.p_bar.update(1)
+        #if self.vis:
+        #    time.sleep(self.SIMULATION_STEP_DELAY)
+        # self.p_bar.update(1)
 
     def read_debug_parameter(self):
         # read the value of task parameter
-        x = p.readUserDebugParameter(self.xin)
-        y = p.readUserDebugParameter(self.yin)
-        z = p.readUserDebugParameter(self.zin)
-        roll = p.readUserDebugParameter(self.rollId)
-        pitch = p.readUserDebugParameter(self.pitchId)
-        yaw = p.readUserDebugParameter(self.yawId)
-        gripper_opening_length = p.readUserDebugParameter(self.gripper_opening_length_control)
+        read_vals = [
+            p.readUserDebugParameter(param)
+            for param in self.joint_debug_params + [self.gripper_opening_length_control]
+        ]
 
-        return x, y, z, roll, pitch, yaw, gripper_opening_length
+        return read_vals
 
-    def step(self, action, control_method='joint'):
+    def convert_action(self, action):
+        # action is one of the 16 possible actions. we can convert this to a joint index and a direction
+        # by dividing by 2 and taking the floor and remainder, respectively.
+        if action < self.base_actions:
+            joint_index = action // 2
+            direction = action % 2
+
+            returnme = [0] * 8
+            returnme[joint_index] = -1 if direction == 0 else 1
+            return returnme
+        else:
+            return self.robot.convert_action(action)
+
+    def step(self, action):
         """
         action: (x, y, z, roll, pitch, yaw, gripper_opening_length) for End Effector Position Control
                 (a1, a2, a3, a4, a5, a6, a7, gripper_opening_length) for Joint Position Control
         control_method:  'end' for end effector position control
                          'joint' for joint position control
         """
-        assert control_method in ('joint', 'end')
-        self.robot.move_ee(action[:-1], control_method)
-        self.robot.move_gripper(action[-1])
+        if action < self.base_actions:
+            joint_index = action // 2
+            direction = action % 2
+
+            cvt_action = [0] * 8
+            cvt_action[joint_index] = -1 if direction == 0 else 1
+
+            self.robot.move_arm_step(cvt_action)
+        else:
+            self.robot.move_arm_bonus(action)
+
         for _ in range(120):  # Wait for a few steps
             self.step_simulation()
 
         reward = self.update_reward()
-        done = True if reward == 1 else False
-        info = dict(box_opened=self.box_opened, btn_pressed=self.btn_pressed, box_closed=self.box_closed)
-        return self.get_observation(), reward, done, info
+        done = True if self.task.is_done() else False
+        return self.get_observation(), reward, done, {}
 
     def update_reward(self):
-        reward = 0
-        if not self.box_opened:
-            if p.getJointState(self.boxID, 1)[0] > 1.9:
-                self.box_opened = True
-                print('Box opened!')
-        elif not self.btn_pressed:
-            if p.getJointState(self.boxID, 0)[0] < - 0.02:
-                self.btn_pressed = True
-                print('Btn pressed!')
-        else:
-            if p.getJointState(self.boxID, 1)[0] < 0.1:
-                print('Box closed!')
-                self.box_closed = True
-                reward = 1
-        return reward
+        self.reward = self.task.reward()
+        return self.reward
 
     def get_observation(self):
-        obs = dict()
-        if isinstance(self.camera, Camera):
-            rgb, depth, seg = self.camera.shot()
-            obs.update(dict(rgb=rgb, depth=depth, seg=seg))
-        else:
-            assert self.camera is None
-        obs.update(self.robot.get_joint_obs())
-
+        # construct a unique mapping from joint position to observation
+        obs = np.zeros(8)
+        for i, _id in enumerate(self.robot.arm_dof_ids):
+            raw_value = p.getJointState(self.robot.id, _id)[0]
+            obs[i] = raw_value
         return obs
 
-    def reset_box(self):
-        p.setJointMotorControl2(self.boxID, 0, p.POSITION_CONTROL, force=1)
-        p.setJointMotorControl2(self.boxID, 1, p.VELOCITY_CONTROL, force=0)
-
     def reset(self):
+        self.steps = 0
         self.robot.reset()
-        self.reset_box()
         return self.get_observation()
 
     def close(self):
         p.disconnect(self.physicsClient)
+
+    def render(self, mode="human"):
+        pass
