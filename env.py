@@ -65,7 +65,9 @@ class EmptyScene(gym.Env):
         # our action space is to select a specific joint and move that joint to the next point.
         # we can move a joint in either direction, and there are 8 joints, so we have 16 possible actions.
         self.base_actions = 16
-        self.action_space = gym.spaces.Discrete(self.base_actions + self.robot.extra_action_count)
+        self.action_space = gym.spaces.Discrete(
+            self.base_actions + self.robot.extra_action_count
+        )
 
     def set_task(self, task: Task):
         self.task = task
@@ -76,7 +78,7 @@ class EmptyScene(gym.Env):
         """
         self.steps += 1
         p.stepSimulation()
-        #if self.vis:
+        # if self.vis:
         #    time.sleep(self.SIMULATION_STEP_DELAY)
         # self.p_bar.update(1)
 
@@ -89,19 +91,6 @@ class EmptyScene(gym.Env):
 
         return read_vals
 
-    def convert_action(self, action):
-        # action is one of the 16 possible actions. we can convert this to a joint index and a direction
-        # by dividing by 2 and taking the floor and remainder, respectively.
-        if action < self.base_actions:
-            joint_index = action // 2
-            direction = action % 2
-
-            returnme = [0] * 8
-            returnme[joint_index] = -1 if direction == 0 else 1
-            return returnme
-        else:
-            return self.robot.convert_action(action)
-
     def step(self, action):
         """
         action: (x, y, z, roll, pitch, yaw, gripper_opening_length) for End Effector Position Control
@@ -113,10 +102,10 @@ class EmptyScene(gym.Env):
             joint_index = action // 2
             direction = action % 2
 
-            cvt_action = [0] * 8
-            cvt_action[joint_index] = -1 if direction == 0 else 1
+            action = [0] * 8
+            action[joint_index] = -1 if direction == 0 else 1
 
-            self.robot.move_arm_step(cvt_action)
+            self.robot.move_arm_step(action)
         else:
             self.robot.move_arm_bonus(action)
 
@@ -131,7 +120,7 @@ class EmptyScene(gym.Env):
         last_reward = self.reward
         self.reward = self.task.reward()
         if last_reward > self.reward:
-            return self.reward -1 # punish stepping away from the goal
+            return self.reward - 1  # punish stepping away from the goal
         return self.reward
 
     def get_observation(self):

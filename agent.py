@@ -3,8 +3,6 @@ import numpy as np
 import abc
 from stable_baselines3 import ppo
 
-Transition = namedtuple("Transition", ("state", "action", "reward", "next_state"))
-
 
 class BaseAgent(object):
     @abc.abstractmethod
@@ -44,13 +42,3 @@ class SimpleAgent(BaseAgent):
                     self.experience[hashable_observation].items(), key=lambda x: x[1]
                 )[0]
         return self.last_action
-
-
-class StableBaselinesAgent(BaseAgent):
-    def __init__(self, env):
-        self.env = env
-        self.model = ppo.PPO("MlpPolicy", env, verbose=1)
-        self.model.learn(total_timesteps=10000)
-
-    def act(self, observation, reward, done):
-        return self.model.predict(observation)[0]

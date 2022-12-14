@@ -9,7 +9,7 @@ class KinovaRobotiq85(object):
     The base class for robots
     """
 
-    def __init__(self, pos, ori):
+    def __init__(self, pos, ori, extra_action_count=16):
         """
         Arguments:
             pos: [x y z]
@@ -38,14 +38,13 @@ class KinovaRobotiq85(object):
         self.base_ori_rpy = ori
         self.base_ori = p.getQuaternionFromEuler(ori)
         self.id = None
-        self.extra_action_count = 0
+        self.extra_action_count = extra_action_count
         self.bonus_actions = []
 
     def load(self):
         self.__init_robot__()
         self.__parse_joint_info__()
         self.__post_load__()
-        print(self.joints)
 
     def step_simulation(self):
         raise RuntimeError(
@@ -239,14 +238,13 @@ class KinovaRobotiq85(object):
 
     def move_arm_bonus_pos(self, action):
         action_id = abs(self.extra_action_count - action)
-        print(action_id, len(self.bonus_actions), self.bonus_actions)
-        self.bonus_actions[action_id] = action
+        action = self.bonus_actions[action_id]
         for i, j in enumerate(self.arm_dof_ids):
             p.setJointMotorControl2(
                 self.id,
                 j,
                 p.POSITION_CONTROL,
-                targetPosition=self.bonus_actions[i],
+                targetPosition=action[i],
                 force=self.joints[j].maxForce * 100,
                 maxVelocity=self.joints[j].maxVelocity,
             )
