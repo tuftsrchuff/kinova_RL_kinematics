@@ -1,11 +1,10 @@
 import pybullet as p
 import numpy as np
 import math
-import gym
 from collections import namedtuple
 
 # MOVE_CHUNK = (np.pi / 10)
-MOVE_CHUNK_COUNT = 60
+MOVE_CHUNK_COUNT = 40
 
 
 class KinovaRobotiq85(object):
