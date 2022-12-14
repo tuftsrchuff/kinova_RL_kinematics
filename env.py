@@ -1,5 +1,3 @@
-import time
-
 import numpy as np
 import pybullet as p
 import pybullet_data
@@ -64,7 +62,9 @@ class EmptyScene(gym.Env):
         self.observation_space = gym.spaces.MultiDiscrete(
             np.ones(7) * ROBOT_MOVE_CHUNKS
         )
-        self.action_space = gym.spaces.Discrete(self.robot.arm_num_dofs * 2)
+        self.action_space = gym.spaces.Discrete(
+            self.robot.arm_num_dofs * 2 + 2
+        )  # arm dof's left and right, then gripper open/close
 
     def set_task(self, task: Task):
         self.task = task
@@ -86,13 +86,18 @@ class EmptyScene(gym.Env):
         return read_vals
 
     def step(self, action):
-        # if action < self.base_actions:
-        return_action = [0] * self.robot.arm_num_dofs
-        joint_index = action // 2
-        direction = action % 2
-        return_action[joint_index] = -1 if direction == 0 else 1
+        if action < self.robot.arm_num_dofs * 2:
+            return_action = [0] * self.robot.arm_num_dofs
+            joint_index = action // 2
+            direction = action % 2
+            return_action[joint_index] = -1 if direction == 0 else 1
 
-        self.robot.move_arm_step(return_action)
+            self.robot.move_arm_step(return_action)
+        elif action == self.robot.arm_num_dofs * 2:
+            self.robot.open_gripper()
+        elif action == self.robot.arm_num_dofs * 2 + 1:
+            self.robot.close_gripper()
+
         # else:
         #    self.robot.move_arm_bonus(action)
 

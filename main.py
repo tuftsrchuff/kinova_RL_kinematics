@@ -3,12 +3,13 @@ import os
 import time as t
 import tqdm
 import numpy as np
+import pybullet as p
+
 from env import EmptyScene
 from robot import KinovaRobotiq85
 from task import GoToTask
 from utilities import YCBModels, Camera
 
-import pybullet as p
 from stable_baselines3 import PPO
 from stable_baselines3.common.env_util import make_vec_env
 
@@ -40,12 +41,11 @@ def learn_on_task(model, env, deterministic=False, timeout_seconds=60, step_time
         action, _ = model.predict(
             obs, deterministic=deterministic
         )  # ignoring states return val
-        obs, rewards, dones, _ = env.step(action)  # ignoring info return val
+        obs, _, dones, _ = env.step(action)  # ignoring rewards, info return val
         d = (
             dones if type(dones) is np.ndarray else np.asarray(dones)
         )  # ensure dones is a list
         if d.any() or timeout(step_time, step_times):
-            print(np.max(rewards))
             model.train()
             obs = env.reset()
             step_time = t.time()
@@ -83,9 +83,6 @@ def learner():
 
     print("learn")
     learn_with_timeout(model, 45)
-
-    # print("start learn")
-    # model = run_on_task(model, env, deterministic=True)
 
     del env
     p.disconnect()
