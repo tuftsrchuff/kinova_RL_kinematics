@@ -26,19 +26,30 @@ def learner():
     robot.construct_new_position_actions()
     env.set_task(GoToTask((0.25, 0.25, 0.25), robot.id, robot.eef_id))
 
+    print("make env")
     env = make_vec_env(lambda: env, n_envs=40)
 
-    model = PPO("MlpPolicy", env, verbose=1, n_steps=20, batch_size=10, seed=0)
+    print("make model")
+    model = PPO("MlpPolicy", env, verbose=1, n_steps=20, batch_size=100, seed=0)
+    print("setup learn")
     model.learn(total_timesteps=20)
     obs = env.reset()
     start_time = t.time()
+    step_time = t.time()
 
+    print("enter loop")
     while True:
-        action, _ = model.predict(obs, deterministic=True)  # ignoring states return val
+        action, _ = model.predict(obs)  # ignoring states return val
         obs, rewards, dones, info = env.step(action)
-        if all(dones) or timeout(start_time, 30):
-            print("Done.")
+        if any(dones) or timeout(step_time, 3):
+            print(max(rewards))
             model.train()
+            obs = env.reset()
+            step_time = t.time()
+            print('resume')
+        if all(dones) or timeout(start_time, 30):
+            model.train()
+            print("Done.")
             break
 
     del env, camera
@@ -51,14 +62,12 @@ def learner():
     env.set_task(GoToTask((0.25, 0.25, 0.25), robot.id, robot.eef_id))
     obs = env.reset()
     while True:
-        action, _ = model.predict(obs)  # ignoring states return val
+        action, _ = model.predict(obs, deterministic=False)  # ignoring states return val
         obs, rewards, dones, info = env.step(action)
         print(rewards)
         if dones:
-            import time
-
-            time.sleep(100)
-            break
+            obs = env.reset()
+            # break
 
 
 def random_agent():

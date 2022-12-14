@@ -74,6 +74,7 @@ class EmptyScene(gym.Env):
         """
         Hook p.stepSimulation()
         """
+        self.steps += 1
         p.stepSimulation()
         #if self.vis:
         #    time.sleep(self.SIMULATION_STEP_DELAY)
@@ -127,7 +128,10 @@ class EmptyScene(gym.Env):
         return self.get_observation(), reward, done, {}
 
     def update_reward(self):
+        last_reward = self.reward
         self.reward = self.task.reward()
+        if last_reward > self.reward:
+            return self.reward -1 # punish stepping away from the goal
         return self.reward
 
     def get_observation(self):
@@ -140,6 +144,7 @@ class EmptyScene(gym.Env):
 
     def reset(self):
         self.steps = 0
+        self.reward = 0
         self.robot.reset()
         return self.get_observation()
 
