@@ -45,7 +45,10 @@ class GoToTask(Task):
 
     def is_done(self):
         ee_pos = p.getLinkState(self.robot_id, self.eef_id)[0]
-        return np.linalg.norm(np.array(ee_pos) - np.array(self.target_pos)) < self.target_radius
+        return (
+            np.linalg.norm(np.array(ee_pos) - np.array(self.target_pos))
+            < self.target_radius
+        )
 
     def get_observation(self):
         ee_pos = p.getLinkState(self.robot_id, self.eef_id)[0]

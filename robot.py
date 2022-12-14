@@ -1,7 +1,11 @@
 import pybullet as p
 import numpy as np
 import math
+import gym
 from collections import namedtuple
+
+# MOVE_CHUNK = (np.pi / 10)
+MOVE_CHUNK_COUNT = 60
 
 
 class KinovaRobotiq85(object):
@@ -9,7 +13,7 @@ class KinovaRobotiq85(object):
     The base class for robots
     """
 
-    def __init__(self, pos, ori, extra_action_count=16):
+    def __init__(self, pos, ori, extra_action_count=0):
         """
         Arguments:
             pos: [x y z]
@@ -40,6 +44,19 @@ class KinovaRobotiq85(object):
         self.id = None
         self.extra_action_count = extra_action_count
         self.bonus_actions = []
+
+    def joint_position_to_observation(self, joint_position):
+        positions = []
+        for jp in joint_position:
+            jp = jp % (np.pi * 2)
+            # now the joint position is in the range of [0, 2pi],
+            # place it in one of the MOVE_CHUNK_COUNT bins
+            jp = int(jp / (np.pi * 2) * MOVE_CHUNK_COUNT)
+            positions.append(jp)
+        if tuple(positions) in self.joint_positions:
+            return self.joint_positions[tuple(positions)]
+        else:
+            raise RuntimeError("Joint position not found in joint_positions")
 
     def load(self):
         self.__init_robot__()
@@ -159,6 +176,20 @@ class KinovaRobotiq85(object):
             # ee_pos=ee_pos
         )
 
+    def go_to_action_index(self, action_index):
+        """
+        Go to a specific action index
+        """
+        try:
+            joint_position = list(self.joint_positions.keys())[action_index]
+            self.move_arm_pos(joint_position)
+        except IndexError:
+            print(
+                "Invalid action index: {} of {}".format(
+                    action_index, len(self.joint_positions)
+                )
+            )
+
     def __init_robot__(self):
         self.arm_num_dofs = 7
         self.eef_id = 8
@@ -209,7 +240,7 @@ class KinovaRobotiq85(object):
             for joint_id in self.arm_controllable_joints
         ]
         target_joint_positions = [
-            current_joint_positions[i] + (action[i] * (np.pi / 10))
+            current_joint_positions[i] + (action[i] * 1 / MOVE_CHUNK_COUNT)
             for i in range(self.arm_num_dofs)
         ]
         self.move_arm_pos(target_joint_positions)

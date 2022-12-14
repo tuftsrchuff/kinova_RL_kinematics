@@ -4,10 +4,10 @@ import numpy as np
 import pybullet as p
 import pybullet_data
 from robot import KinovaRobotiq85
+from robot import MOVE_CHUNK_COUNT as ROBOT_MOVE_CHUNKS
 
 from utilities import Models
 from task import Task
-from tqdm import tqdm
 import gym
 
 
@@ -59,15 +59,12 @@ class EmptyScene(gym.Env):
         self.reward = 0
         self.task = Task()
 
-        self.observation_space = gym.spaces.Box(
-            low=-np.pi, high=np.pi, shape=(8,), dtype=np.float32
-        )
         # our action space is to select a specific joint and move that joint to the next point.
         # we can move a joint in either direction, and there are 8 joints, so we have 16 possible actions.
-        self.base_actions = 16
-        self.action_space = gym.spaces.Discrete(
-            self.base_actions + self.robot.extra_action_count
+        self.observation_space = gym.spaces.MultiDiscrete(
+            np.ones(7) * ROBOT_MOVE_CHUNKS
         )
+        self.action_space = gym.spaces.Discrete(self.robot.arm_num_dofs * 2)
 
     def set_task(self, task: Task):
         self.task = task
@@ -78,9 +75,6 @@ class EmptyScene(gym.Env):
         """
         self.steps += 1
         p.stepSimulation()
-        # if self.vis:
-        #    time.sleep(self.SIMULATION_STEP_DELAY)
-        # self.p_bar.update(1)
 
     def read_debug_parameter(self):
         # read the value of task parameter
@@ -92,44 +86,44 @@ class EmptyScene(gym.Env):
         return read_vals
 
     def step(self, action):
-        """
-        action: (x, y, z, roll, pitch, yaw, gripper_opening_length) for End Effector Position Control
-                (a1, a2, a3, a4, a5, a6, a7, gripper_opening_length) for Joint Position Control
-        control_method:  'end' for end effector position control
-                         'joint' for joint position control
-        """
-        if action < self.base_actions:
-            joint_index = action // 2
-            direction = action % 2
+        # if action < self.base_actions:
+        return_action = [0] * self.robot.arm_num_dofs
+        joint_index = action // 2
+        direction = action % 2
+        return_action[joint_index] = -1 if direction == 0 else 1
 
-            action = [0] * 8
-            action[joint_index] = -1 if direction == 0 else 1
+        self.robot.move_arm_step(return_action)
+        # else:
+        #    self.robot.move_arm_bonus(action)
 
-            self.robot.move_arm_step(action)
-        else:
-            self.robot.move_arm_bonus(action)
-
-        for _ in range(120):  # Wait for a few steps
+        for _ in range(10):  # Wait for a few steps
             self.step_simulation()
-
-        reward = self.update_reward()
         done = True if self.task.is_done() else False
+        reward = self.update_reward(done)
         return self.get_observation(), reward, done, {}
 
-    def update_reward(self):
+    def update_reward(self, is_done):
         last_reward = self.reward
         self.reward = self.task.reward()
         if last_reward > self.reward:
             return self.reward - 1  # punish stepping away from the goal
-        return self.reward
+        return self.reward + (10 if is_done else 0)  # reward getting to the goal
+
+    def map_observation(self, obs):
+        for i in range(len(obs)):
+            # map to [0, 2*pi]
+            obs[i] = (obs[i] + np.pi) % (2 * np.pi)
+            # now map to [0, ROBOT_MOVE_CHUNKS)
+            obs[i] = int(obs[i] / (2 * np.pi) * ROBOT_MOVE_CHUNKS)
+        return obs
 
     def get_observation(self):
         # construct a unique mapping from joint position to observation
-        obs = np.zeros(8)
+        obs = np.zeros(self.robot.arm_num_dofs)
         for i, _id in enumerate(self.robot.arm_dof_ids):
             raw_value = p.getJointState(self.robot.id, _id)[0]
             obs[i] = raw_value
-        return obs
+        return self.map_observation(obs)
 
     def reset(self):
         self.steps = 0
