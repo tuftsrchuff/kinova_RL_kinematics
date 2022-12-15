@@ -50,6 +50,12 @@ class GoToTask(Task):
             < self.target_radius
         )
 
-    def get_observation(self):
-        ee_pos = p.getLinkState(self.robot_id, self.eef_id)[0]
-        return np.array(ee_pos)
+class CloseGripperTask(Task):
+    def __init__(self, robot):
+        self.robot = robot
+
+    def reward(self):
+        return 1 if self.is_done() else 0
+
+    def is_done(self):
+        return self.robot.is_gripper_closed

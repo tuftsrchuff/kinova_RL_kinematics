@@ -1,12 +1,14 @@
 import numpy as np
 import pybullet as p
 import pybullet_data
+import gym
+
 from robot import KinovaRobotiq85
 from robot import MOVE_CHUNK_COUNT as ROBOT_MOVE_CHUNKS
+from violations import CollisionViolation
 
 from utilities import Models
 from task import Task
-import gym
 
 
 class FailToReachTargetError(RuntimeError):
@@ -66,6 +68,14 @@ class EmptyScene(gym.Env):
             self.robot.arm_num_dofs * 2 + 2
         )  # arm dof's left and right, then gripper open/close
 
+        self.collision_violation = CollisionViolation(
+            {
+                "joint_ids": [0, 1, 2, 3, 4, 5, 6],
+                "object_id_self": self.robot.id,
+                "object_ids_env": [self.planeID],
+            }
+        )
+
     def set_task(self, task: Task):
         self.task = task
 
@@ -110,9 +120,15 @@ class EmptyScene(gym.Env):
     def update_reward(self, is_done):
         last_reward = self.reward
         self.reward = self.task.reward()
+        extra_punish = 0
         if last_reward > self.reward:
-            return self.reward - 1  # punish stepping away from the goal
-        return self.reward + (10 if is_done else 0)  # reward getting to the goal
+            extra_punish -= 1  # punish stepping away from the goal
+        current_collisions = self.collision_violation.find_active_collision()
+        if len(current_collisions) > 0:
+            extra_punish -= 1  # punish collision
+        if is_done:
+            extra_punish += 10 # reward reaching the goal
+        return self.reward + extra_punish
 
     def map_observation(self, obs):
         for i in range(len(obs)):

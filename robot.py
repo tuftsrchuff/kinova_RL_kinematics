@@ -4,7 +4,7 @@ import math
 from collections import namedtuple
 
 # MOVE_CHUNK = (np.pi / 10)
-MOVE_CHUNK_COUNT = 40
+MOVE_CHUNK_COUNT = 60
 
 
 class KinovaRobotiq85(object):
@@ -43,6 +43,7 @@ class KinovaRobotiq85(object):
         self.id = None
         self.extra_action_count = extra_action_count
         self.bonus_actions = []
+        self.is_gripper_closed = False
 
     def joint_position_to_observation(self, joint_position):
         positions = []
@@ -157,9 +158,11 @@ class KinovaRobotiq85(object):
 
     def open_gripper(self):
         self.move_gripper(self.gripper_range[1])
+        self.is_gripper_closed = False
 
     def close_gripper(self):
         self.move_gripper(self.gripper_range[0])
+        self.is_gripper_closed = True
 
     def get_joint_obs(self):
         positions = []
@@ -234,6 +237,7 @@ class KinovaRobotiq85(object):
         self.move_arm_vel(target_joint_velocities)
 
     def move_arm_step_pos(self, action):
+        self.last_action = action
         current_joint_positions = [
             p.getJointState(self.id, joint_id)[0]
             for joint_id in self.arm_controllable_joints
