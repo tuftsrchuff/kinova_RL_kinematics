@@ -76,6 +76,10 @@ class EmptyScene(gym.Env):
             }
         )
 
+    def create_object(self, urdf_path, position, orientation):
+        return p.loadURDF(urdf_path, position, orientation)
+
+
     def set_task(self, task: Task):
         self.task = task
 

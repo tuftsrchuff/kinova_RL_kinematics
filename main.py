@@ -7,7 +7,7 @@ import pybullet as p
 
 from env import EmptyScene
 from robot import KinovaRobotiq85
-from task import GoToTask, CloseGripperTask
+from task import ObjectMoveTask, GoToTask
 from utilities import YCBModels, Camera
 from violations import CollisionViolation, ActionUndoViolation
 from violationcache import ViolationCache
@@ -118,33 +118,25 @@ def learner():
     env = EmptyScene(robot, ycb_models, camera, vis=False)
     robot.construct_new_position_actions()
     #target_task = GoToTask(robot.id, robot.eef_id, (0.25, 0.25, 0.25), 0.05)
-    target_task = CloseGripperTask(robot)
+    #target_task = GoToTask(robot.id, robot.eef_id, (0.25, 0.25, 0.25), 0.25)
+    #target_task = CloseGripperTask(robot)
+    #target_task = GrabTask(robot, robot.eef_id, (0.25, 0.25, 0.25), 0.25)
+    target_task = ObjectMoveTask("./urdf/objects/block.urdf", (0.25, 0, 0.25), (0, 0, 0, 1), robot)
     env.set_task(target_task)
-    #violation_cache = ViolationCache([
-    #    CollisionViolation(
-    #        {
-    #            "joint_ids": [0, 1, 2, 3, 4, 5, 6],
-    #            "object_id_self": robot.id,
-    #            "object_ids_env": [env.planeID],
-    #        }
-    #    ),
-    #    ]
-    #)
 
     print("make env")
     env = make_vec_env(lambda: env, n_envs=10)  # type: ignore
     model = PPO("MlpPolicy", env, verbose=1, n_steps=50, batch_size=100, seed=0)
 
     print("learn")
-    learn_with_timeout(model, 30)
-    #learn_with_actioncache(model, env, violation_cache, 5*60)
+    learn_with_timeout(model, 5*60)
 
     del env
     p.disconnect()
     print("\n\n\nDone")
 
     env = EmptyScene(robot, ycb_models, camera, vis=True)
-    #target_task.spawn_target()
+    target_task.reset()
     env.set_task(target_task)
     run_on_task(model, env, deterministic=False)
 
