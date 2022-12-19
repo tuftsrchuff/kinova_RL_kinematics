@@ -2,13 +2,19 @@ import pybullet as p
 import numpy as np
 import math
 from collections import namedtuple
+from abc import ABC, abstractmethod
+from typing import List, Tuple, Dict, Any, Optional, Union
+import rospy
+from moveit_commander import RobotCommander, PlanningSceneInterface, MoveGroupCommander
+from moveit_msgs.msg import RobotState, Constraints, JointConstraint, PositionConstraint, OrientationConstraint, BoundingVolume
+from sensor_msgs.msg import JointState
 
 # MOVE_CHUNK = (np.pi / 10)
 MOVE_CHUNK_COUNT = 60
 
 
-class KinovaRobotiq85(object):
-    def __init__(self, pos, ori, extra_action_count=0):
+class KinovaRobotiq85(ABC):
+    def __init__(self, pos, ori, extra_action_count=0, start_joint_angles=None):
         self.base_pos = pos
         self.base_ori_rpy = ori
         self.base_ori = p.getQuaternionFromEuler(ori)
@@ -16,20 +22,69 @@ class KinovaRobotiq85(object):
         self.extra_action_count = extra_action_count
         self.bonus_actions = []
         self.is_gripper_closed = False
+        self.start_joint_angles = start_joint_angles
 
-    def joint_position_to_observation(self, joint_position):
-        positions = []
-        for jp in joint_position:
-            jp = jp % (np.pi * 2)
-            # now the joint position is in the range of [0, 2pi],
-            # place it in one of the MOVE_CHUNK_COUNT bins
-            jp = int(jp / (np.pi * 2) * MOVE_CHUNK_COUNT)
-            positions.append(jp)
-        if tuple(positions) in self.joint_positions:
-            return self.joint_positions[tuple(positions)]
-        else:
-            raise RuntimeError("Joint position not found in joint_positions")
+    @abstractmethod
+    def load(self):
+        pass
 
+    @abstractmethod
+    def step_simulation(self):
+        pass
+
+    def reset(self):
+        self.reset_arm()
+        self.reset_gripper()
+
+    def reset_arm(self):
+        pass
+
+    def reset_gripper(self):
+        self.open_gripper()
+
+    @abstractmethod
+    def open_gripper(self):
+        pass
+
+    @abstractmethod
+    def close_gripper(self):
+        pass
+
+    @abstractmethod
+    def in_collision(self):
+        pass
+
+    @abstractmethod
+    def violates_limits(self, target_joint_positions):
+        pass
+
+    @abstractmethod
+    def construct_new_position_actions(self):
+        pass
+
+    @abstractmethod
+    def move_gripper(self, open_length):
+        pass
+
+    @abstractmethod
+    def get_joint_states(self) -> List[float]:
+        pass
+
+    @abstractmethod
+    def goto_joint_states(self, target_joint_positions: List[float]):
+        pass
+
+    def move_arm_step(self, action):
+        self.last_action = action
+        current_joint_positions = self.get_joint_states()
+        target_joint_positions = [
+            current_joint_positions[i] + (action[i] * 1 / MOVE_CHUNK_COUNT)
+            for i in range(len(current_joint_positions))
+        ]
+        return self.goto_joint_states(target_joint_positions)
+
+
+class KinovaRobotiq85Sim(KinovaRobotiq85):
     def load(self):
         self.__init_robot__()
         self.__parse_joint_info__()
@@ -108,10 +163,6 @@ class KinovaRobotiq85(object):
             if info.controllable
         ][: self.arm_num_dofs]
 
-    def reset(self):
-        self.reset_arm()
-        self.reset_gripper()
-
     def reset_arm(self):
         """
         reset to rest poses
@@ -125,9 +176,6 @@ class KinovaRobotiq85(object):
         for _ in range(10):
             self.step_simulation()
 
-    def reset_gripper(self):
-        self.open_gripper()
-
     def open_gripper(self):
         self.move_gripper(self.gripper_range[1])
         self.is_gripper_closed = False
@@ -135,34 +183,6 @@ class KinovaRobotiq85(object):
     def close_gripper(self):
         self.move_gripper(self.gripper_range[0])
         self.is_gripper_closed = True
-
-    def get_joint_obs(self):
-        positions = []
-        # velocities = []
-        for joint_id in self.controllable_joints:
-            pos, vel, _, _ = p.getJointState(self.id, joint_id)
-            positions.append(pos)
-            # velocities.append(vel)
-        # ee_pos = p.getLinkState(self.id, self.eef_id)[0]
-        return dict(
-            positions=positions,
-            # velocities=velocities,
-            # ee_pos=ee_pos
-        )
-
-    def go_to_action_index(self, action_index):
-        """
-        Go to a specific action index
-        """
-        try:
-            joint_position = list(self.joint_positions.keys())[action_index]
-            self.move_arm_pos(joint_position)
-        except IndexError:
-            print(
-                "Invalid action index: {} of {}".format(
-                    action_index, len(self.joint_positions)
-                )
-            )
 
     def __init_robot__(self):
         self.arm_num_dofs = 7
@@ -188,51 +208,21 @@ class KinovaRobotiq85(object):
         )
         self.gripper_range = [0, 0.085]
 
-    def move_arm(self, action):
-        self.move_arm_pos(action)
+    def get_joint_states(self):
+        joint_states = p.getJointStates(self.id, self.arm_controllable_joints)
+        joint_positions = [state[0] for state in joint_states]
+        return joint_positions
 
-    def move_arm_step(self, action):
-        self.move_arm_step_pos(action)
-
-    def move_arm_bonus(self, action):
-        self.move_arm_bonus_pos(action)
-
-    def move_arm_step_vel(self, action):
-        current_joint_velocities = [
-            p.getJointState(self.id, joint_id)[1]
-            for joint_id in self.arm_controllable_joints
-        ]
-        target_joint_velocities = [
-            action[i] * 0.5 if action[i] != 0 else current_joint_velocities[i]
-            for i in range(self.arm_num_dofs)
-        ]
-        self.move_arm_vel(target_joint_velocities)
-
-    def move_arm_step_pos(self, action):
-        self.last_action = action
-        current_joint_positions = [
-            p.getJointState(self.id, joint_id)[0]
-            for joint_id in self.arm_controllable_joints
-        ]
-        target_joint_positions = [
-            current_joint_positions[i] + (action[i] * 1 / MOVE_CHUNK_COUNT)
-            for i in range(self.arm_num_dofs)
-        ]
-        #if self.violates_limits(target_joint_positions):
-        #    return False
-        return self.move_arm_pos(target_joint_positions)
-
-    def move_arm_pos(self, action):
-        for i, j in enumerate(self.arm_dof_ids):
+    def goto_joint_states(self, joint_states):
+        for joint_state, joint_id in zip(joint_states, self.arm_controllable_joints):
             p.setJointMotorControl2(
                 self.id,
-                j,
+                joint_id,
                 p.POSITION_CONTROL,
-                targetPosition=action[i],
-                force=self.joints[j].maxForce * 100,
-                maxVelocity=self.joints[j].maxVelocity,
+                targetPosition=joint_state,
+                force=self.joints[joint_id].maxForce * 100,
+                maxVelocity=self.joints[joint_id].maxVelocity,
             )
-        return not self.in_collision()
 
     def in_collision(self):
         return p.getContactPoints(self.id) != []
@@ -245,30 +235,6 @@ class KinovaRobotiq85(object):
                 for i in range(self.arm_num_dofs)
             ]
         )
-
-    def move_arm_vel(self, action):
-        for i, j in enumerate(self.arm_dof_ids):
-            p.setJointMotorControl2(
-                self.id,
-                j,
-                p.VELOCITY_CONTROL,
-                targetVelocity=action[i],
-                force=self.joints[j].maxForce * 100,
-                maxVelocity=self.joints[j].maxVelocity,
-            )
-
-    def move_arm_bonus_pos(self, action):
-        action_id = abs(self.extra_action_count - action)
-        action = self.bonus_actions[action_id]
-        for i, j in enumerate(self.arm_dof_ids):
-            p.setJointMotorControl2(
-                self.id,
-                j,
-                p.POSITION_CONTROL,
-                targetPosition=action[i],
-                force=self.joints[j].maxForce * 100,
-                maxVelocity=self.joints[j].maxVelocity,
-            )
 
     def construct_new_position_actions(self):
         self.bonus_actions = []
@@ -332,3 +298,76 @@ class KinovaRobotiq85(object):
             force=self.joints[self.mimic_parent_id].maxForce,
             maxVelocity=self.joints[self.mimic_parent_id].maxVelocity,
         )
+
+class KinovaRobotiq85Real(KinovaRobotiq85):
+    def __init__(self, base_pos, base_ori, use_gui=False):
+        super().__init__(base_pos, base_ori, use_gui)
+        rospy.init_node("kinova_robotiq_85_real", anonymous=True)
+        self.__init_robot__()
+
+    def __init_robot__(self):
+        self.joint_state_sub = rospy.Subscriber(
+            "/my_gen3/base_feedback/joint_state", JointState, self.joint_state_callback
+        )
+        self.joint_state = None
+        # wait for joint state to be published
+        while self.joint_state is None:
+            rospy.loginfo_throttle(1, "Waiting for joint state to be published...")
+            rospy.sleep(0.1)
+
+        rospy.loginfo("Joint state received: {}".format(self.get_joint_states()))
+
+    def joint_state_callback(self, msg):
+        self.joint_state = msg
+
+    def load(self):
+        pass
+
+    def step_simulation(self):
+        pass
+
+    def open_gripper(self):
+        pass
+
+    def close_gripper(self):
+        pass
+
+    def in_collision(self):
+        pass
+
+    def violates_limits(self, target_joint_positions):
+        pass
+
+    def construct_new_position_actions(self):
+        pass
+
+    def move_gripper(self, open_length):
+        pass
+
+    def get_joint_states(self) -> List[float]:
+        assert self.joint_state is not None
+        assert type(self.joint_state) == JointState
+        positions = self.joint_state.position
+        returnme = []
+        for n in range(7):
+            returnme.append(positions[n])
+        return returnme
+
+    def goto_joint_states(self, target_joint_positions: List[float]):
+        # target joint positions is a list of 7 floats
+        assert len(target_joint_positions) == 7
+        # use moveit to move each joint in the robot
+        # moveit is a service that takes in a joint name and a target position
+        # and moves that joint to that position
+        # the joint names are:
+        # "joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6", "joint_7"
+        # the target positions are floats
+        # setup the service
+        rospy.wait_for_service("my_gen3/moveit/move_joint")
+        move_joint = rospy.ServiceProxy("my_gen3/moveit/move_joint", MoveJoint)
+        # call the service
+        for n in range(7):
+            joint_name = "joint_" + str(n + 1)
+            target_position = target_joint_positions[n]
+            move_joint(joint_name, target_position)
+
