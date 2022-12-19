@@ -28,6 +28,7 @@ class EmptyScene(gym.Env):
         self.vis = vis
         self.camera = camera
         self.steps = 0
+        self.violates_limits = False  # assume that we start in a non-violating state
 
         # define environment
         self.physicsClient = p.connect(p.GUI if self.vis else p.DIRECT)
@@ -65,8 +66,8 @@ class EmptyScene(gym.Env):
             np.ones(7) * ROBOT_MOVE_CHUNKS
         )
         self.action_space = gym.spaces.Discrete(
-            self.robot.arm_num_dofs * 2 + 2
-        )  # arm dof's left and right, then gripper open/close
+            self.robot.arm_num_dofs * 2
+        )  # arm dof's left and right
 
         self.collision_violation = CollisionViolation(
             {
@@ -76,17 +77,21 @@ class EmptyScene(gym.Env):
             }
         )
 
+    def get_joint_limits(self):
+        limits = []
+        for i in range(self.robot.arm_num_dofs):
+            limits.append(
+                p.getJointInfo(self.robot.id, self.robot.arm_dof_ids[i])[8:10]
+            )
+        return limits
+
     def create_object(self, urdf_path, position, orientation):
         return p.loadURDF(urdf_path, position, orientation)
-
 
     def set_task(self, task: Task):
         self.task = task
 
     def step_simulation(self):
-        """
-        Hook p.stepSimulation()
-        """
         self.steps += 1
         p.stepSimulation()
 
@@ -106,12 +111,15 @@ class EmptyScene(gym.Env):
             direction = action % 2
             return_action[joint_index] = -1 if direction == 0 else 1
 
-            self.robot.move_arm_step(return_action)
-        elif action == self.robot.arm_num_dofs * 2:
-            self.robot.open_gripper()
-        elif action == self.robot.arm_num_dofs * 2 + 1:
-            self.robot.close_gripper()
+            success = self.robot.move_arm_step(return_action)
+            if not success:
+                self.violates_limits = True
 
+        # elif action == self.robot.arm_num_dofs * 2:
+        #     self.robot.open_gripper()
+        # elif action == self.robot.arm_num_dofs * 2 + 1:
+        #     self.robot.close_gripper()
+        #
         # else:
         #    self.robot.move_arm_bonus(action)
 
@@ -127,11 +135,14 @@ class EmptyScene(gym.Env):
         extra_punish = 0
         if last_reward > self.reward:
             extra_punish -= 1  # punish stepping away from the goal
-        current_collisions = self.collision_violation.find_active_collision()
-        if len(current_collisions) > 0:
-            extra_punish -= 1  # punish collision
+        # current_collisions = self.collision_violation.find_active_collision()
+        # if len(current_collisions) > 0:
+        #    extra_punish -= 1  # punish collision
+        if self.violates_limits:
+            extra_punish -= 1
+            self.violates_limits = False
         if is_done:
-            extra_punish += 10 # reward reaching the goal
+            extra_punish += 10  # reward reaching the goal
         return self.reward + extra_punish
 
     def map_observation(self, obs):

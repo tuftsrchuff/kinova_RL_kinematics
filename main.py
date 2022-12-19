@@ -7,7 +7,7 @@ import pybullet as p
 
 from env import EmptyScene
 from robot import KinovaRobotiq85
-from task import ObjectMoveTask, GoToTask
+from task import ObjectMoveTask, GoToTask, CloseGripperTask
 from utilities import YCBModels, Camera
 from violations import CollisionViolation, ActionUndoViolation
 from violationcache import ViolationCache
@@ -87,7 +87,7 @@ def learn_with_actioncache(model, env, actioncache, timeout_seconds,
             eval_freq,
             n_eval_episodes,
             eval_log_path,
-            reset_num_timesteps,
+        reset_num_timesteps,
             tb_log_name,
             progress_bar,
     )
@@ -109,6 +109,16 @@ def learn_with_actioncache(model, env, actioncache, timeout_seconds,
         model.train()
     callback.on_training_end()
 
+def get_task(task_name, args):
+    if task_name == "object_move":
+        return ObjectMoveTask("./urdf/objects/block.urdf", (0.25, 0, 0.25), (0, 0, 0, 1), args['robot'])
+    elif task_name == "go_to":
+        return GoToTask(args['robot'].id, args['robot'].eef_id, (0.25, 0.25, 0.25), args['radius'])
+    elif task_name == 'close_gripper':
+        return CloseGripperTask(args['robot'])
+    else:
+        raise ValueError("Unknown task: {}".format(task_name))
+
 def learner():
     ycb_models = YCBModels(
         os.path.join("./data/ycb", "**", "textured-decmp.obj"),
@@ -117,11 +127,7 @@ def learner():
     robot = KinovaRobotiq85((0, 0, 0), (0, 0, 0))
     env = EmptyScene(robot, ycb_models, camera, vis=False)
     robot.construct_new_position_actions()
-    #target_task = GoToTask(robot.id, robot.eef_id, (0.25, 0.25, 0.25), 0.05)
-    #target_task = GoToTask(robot.id, robot.eef_id, (0.25, 0.25, 0.25), 0.25)
-    #target_task = CloseGripperTask(robot)
-    #target_task = GrabTask(robot, robot.eef_id, (0.25, 0.25, 0.25), 0.25)
-    target_task = ObjectMoveTask("./urdf/objects/block.urdf", (0.25, 0, 0.25), (0, 0, 0, 1), robot)
+    target_task = get_task("go_to", {'robot': robot, 'radius': 0.1})
     env.set_task(target_task)
 
     print("make env")
@@ -129,7 +135,7 @@ def learner():
     model = PPO("MlpPolicy", env, verbose=1, n_steps=50, batch_size=100, seed=0)
 
     print("learn")
-    learn_with_timeout(model, 5*60)
+    learn_with_timeout(model, 1*60)
 
     del env
     p.disconnect()

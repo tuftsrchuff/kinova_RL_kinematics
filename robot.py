@@ -8,35 +8,7 @@ MOVE_CHUNK_COUNT = 60
 
 
 class KinovaRobotiq85(object):
-    """
-    The base class for robots
-    """
-
     def __init__(self, pos, ori, extra_action_count=0):
-        """
-        Arguments:
-            pos: [x y z]
-            ori: [r p y]
-
-        Attributes:
-            id: Int, the ID of the robot
-            eef_id: Int, the ID of the End-Effector
-            arm_num_dofs: Int, the number of DoFs of the arm
-                i.e., the IK for the EE will consider the first `arm_num_dofs` controllable (non-Fixed) joints
-            joints: List, a list of joint info
-            controllable_joints: List of Ints, IDs for all controllable joints
-            arm_controllable_joints: List of Ints, IDs for all controllable joints on the arm (that is, the first `arm_num_dofs` of controllable joints)
-
-            ---
-            For null-space IK
-            ---
-            arm_lower_limits: List, the lower limits for all controllable joints on the arm
-            arm_upper_limits: List
-            arm_joint_ranges: List
-            arm_rest_poses: List, the rest position for all controllable joints on the arm
-
-            gripper_range: List[Min, Max]
-        """
         self.base_pos = pos
         self.base_ori_rpy = ori
         self.base_ori = p.getQuaternionFromEuler(ori)
@@ -246,7 +218,9 @@ class KinovaRobotiq85(object):
             current_joint_positions[i] + (action[i] * 1 / MOVE_CHUNK_COUNT)
             for i in range(self.arm_num_dofs)
         ]
-        self.move_arm_pos(target_joint_positions)
+        #if self.violates_limits(target_joint_positions):
+        #    return False
+        return self.move_arm_pos(target_joint_positions)
 
     def move_arm_pos(self, action):
         for i, j in enumerate(self.arm_dof_ids):
@@ -258,6 +232,19 @@ class KinovaRobotiq85(object):
                 force=self.joints[j].maxForce * 100,
                 maxVelocity=self.joints[j].maxVelocity,
             )
+        return not self.in_collision()
+
+    def in_collision(self):
+        return p.getContactPoints(self.id) != []
+
+    def violates_limits(self, target_joint_positions):
+        return any(
+            [
+                target_joint_positions[i] < self.arm_lower_limits[i]
+                or target_joint_positions[i] > self.arm_upper_limits[i]
+                for i in range(self.arm_num_dofs)
+            ]
+        )
 
     def move_arm_vel(self, action):
         for i, j in enumerate(self.arm_dof_ids):
