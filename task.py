@@ -60,6 +60,9 @@ class CloseGripperTask(Task):
     def is_done(self):
         return self.robot.is_gripper_closed
 
+    def reset(self):
+        pass
+
 class ObjectMoveTask(Task):
     def __init__(self, object_path, position, orientation, robot):
         self.object_path = object_path
