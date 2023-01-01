@@ -1,13 +1,16 @@
-import pybullet as p
-import numpy as np
-import math
-from collections import namedtuple
 from abc import ABC, abstractmethod
-from typing import List, Tuple, Dict, Any, Optional, Union
+from collections import namedtuple
+import math
+from typing import List
+import actionlib
+from control_msgs.msg import GripperCommandAction, GripperCommandGoal
+from moveit_commander import MoveGroupCommander, PlanningSceneInterface, RobotCommander
+from moveit_msgs.msg import (
+    DisplayTrajectory,
+)
+import numpy as np
+import pybullet as p
 import rospy
-from moveit_commander import RobotCommander, PlanningSceneInterface, MoveGroupCommander
-from moveit_msgs.msg import RobotState, Constraints, JointConstraint, PositionConstraint, OrientationConstraint, BoundingVolume
-from sensor_msgs.msg import JointState
 
 # MOVE_CHUNK = (np.pi / 10)
 MOVE_CHUNK_COUNT = 60
@@ -23,6 +26,10 @@ class KinovaRobotiq85(ABC):
         self.bonus_actions = []
         self.is_gripper_closed = False
         self.start_joint_angles = start_joint_angles
+
+        self.arm_num_dofs = 7
+        self.arm_lower_limits = []
+        self.arm_upper_limits = []
 
     @abstractmethod
     def load(self):
@@ -58,9 +65,16 @@ class KinovaRobotiq85(ABC):
     def violates_limits(self, target_joint_positions):
         pass
 
-    @abstractmethod
     def construct_new_position_actions(self):
-        pass
+        self.bonus_actions = []
+        for _ in range(self.extra_action_count):
+            action = np.zeros(self.arm_num_dofs)
+            for n in range(self.arm_num_dofs):
+                joint_pos = np.random.uniform(
+                    self.arm_lower_limits[n], self.arm_upper_limits[n]
+                )
+                action[n] = joint_pos
+            self.bonus_actions.append(action)
 
     @abstractmethod
     def move_gripper(self, open_length):
@@ -236,17 +250,6 @@ class KinovaRobotiq85Sim(KinovaRobotiq85):
             ]
         )
 
-    def construct_new_position_actions(self):
-        self.bonus_actions = []
-        for i in range(self.extra_action_count):
-            action = np.zeros(self.arm_num_dofs)
-            for n in range(self.arm_num_dofs):
-                joint_pos = np.random.uniform(
-                    self.arm_lower_limits[n], self.arm_upper_limits[n]
-                )
-                action[n] = joint_pos
-            self.bonus_actions.append(action)
-
     def __post_load__(self):
         # To control the gripper
         mimic_parent_name = "finger_joint"
@@ -299,6 +302,7 @@ class KinovaRobotiq85Sim(KinovaRobotiq85):
             maxVelocity=self.joints[self.mimic_parent_id].maxVelocity,
         )
 
+
 class KinovaRobotiq85Real(KinovaRobotiq85):
     def __init__(self, base_pos, base_ori, use_gui=False):
         super().__init__(base_pos, base_ori, use_gui)
@@ -306,68 +310,58 @@ class KinovaRobotiq85Real(KinovaRobotiq85):
         self.__init_robot__()
 
     def __init_robot__(self):
-        self.joint_state_sub = rospy.Subscriber(
-            "/my_gen3/base_feedback/joint_state", JointState, self.joint_state_callback
+        # create action client for gripper
+        self.gripper_client = actionlib.SimpleActionClient(
+            "/my_gen3/robotiq_2f_85_gripper_controller/gripper_cmd",
+            GripperCommandAction,
         )
-        self.joint_state = None
-        # wait for joint state to be published
-        while self.joint_state is None:
-            rospy.loginfo_throttle(1, "Waiting for joint state to be published...")
-            rospy.sleep(0.1)
+        self.gripper_client.wait_for_server()
+        rospy.loginfo("Gripper action server connected")
 
-        rospy.loginfo("Joint state received: {}".format(self.get_joint_states()))
+        # setting up moveit interface
+        self.moveit_robotcommander = RobotCommander()
+        self.moveit_scene = PlanningSceneInterface()
+        self.group_name = "arm"
+        self.moveit_group = MoveGroupCommander(self.group_name)
+        self.display_trajectory_publisher = rospy.Publisher(
+            "/move_group/display_planned_path",
+            DisplayTrajectory,
+            queue_size=20,
+        )
 
     def joint_state_callback(self, msg):
         self.joint_state = msg
 
     def load(self):
-        pass
+        pass  # don't need to do anything here: no sim to load
 
     def step_simulation(self):
-        pass
-
-    def open_gripper(self):
-        pass
-
-    def close_gripper(self):
-        pass
+        pass  # don't actually need to do anything here: no sim to step
 
     def in_collision(self):
-        pass
+        pass  # TODO
 
     def violates_limits(self, target_joint_positions):
-        pass
-
-    def construct_new_position_actions(self):
-        pass
+        pass  # TODO
 
     def move_gripper(self, open_length):
-        pass
+        close_gripper_goal = GripperCommandGoal()
+        close_gripper_goal.command.position = open_length
+        close_gripper_goal.command.max_effort = 100
+        self.gripper_client.send_goal(close_gripper_goal)
+        self.gripper_client.wait_for_result()
 
     def get_joint_states(self) -> List[float]:
-        assert self.joint_state is not None
-        assert type(self.joint_state) == JointState
-        positions = self.joint_state.position
+        joints = self.moveit_robotcommander.get_current_state().joint_state
         returnme = []
         for n in range(7):
-            returnme.append(positions[n])
+            returnme.append(joints.position[n])
         return returnme
 
     def goto_joint_states(self, target_joint_positions: List[float]):
-        # target joint positions is a list of 7 floats
-        assert len(target_joint_positions) == 7
-        # use moveit to move each joint in the robot
-        # moveit is a service that takes in a joint name and a target position
-        # and moves that joint to that position
-        # the joint names are:
-        # "joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6", "joint_7"
-        # the target positions are floats
-        # setup the service
-        rospy.wait_for_service("my_gen3/moveit/move_joint")
-        move_joint = rospy.ServiceProxy("my_gen3/moveit/move_joint", MoveJoint)
-        # call the service
-        for n in range(7):
-            joint_name = "joint_" + str(n + 1)
-            target_position = target_joint_positions[n]
-            move_joint(joint_name, target_position)
+        joint_state = self.get_joint_states()
+        for i in range(len(target_joint_positions)):
+            joint_state[i] = target_joint_positions[i]
 
+        self.moveit_group.go(joint_state, wait=True)
+        self.moveit_group.stop()
