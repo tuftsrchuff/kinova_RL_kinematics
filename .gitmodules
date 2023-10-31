@@ -1,3 +1,0 @@
-[submodule "stable-baselines3"]
-	path = stable-baselines3
-	url = https://github.com/cst0/stable-baselines3

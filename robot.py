@@ -2,15 +2,9 @@ from abc import ABC, abstractmethod
 from collections import namedtuple
 import math
 from typing import List
-import actionlib
-from control_msgs.msg import GripperCommandAction, GripperCommandGoal
-from moveit_commander import MoveGroupCommander, PlanningSceneInterface, RobotCommander
-from moveit_msgs.msg import (
-    DisplayTrajectory,
-)
 import numpy as np
 import pybullet as p
-import rospy
+import random
 
 # MOVE_CHUNK = (np.pi / 10)
 MOVE_CHUNK_COUNT = 60
@@ -22,6 +16,7 @@ class KinovaRobotiq85(ABC):
         self.base_ori_rpy = ori
         self.base_ori = p.getQuaternionFromEuler(ori)
         self.id = None
+        self.eef_id = None
         self.extra_action_count = extra_action_count
         self.bonus_actions = []
         self.is_gripper_closed = False
@@ -177,6 +172,18 @@ class KinovaRobotiq85Sim(KinovaRobotiq85):
             if info.controllable
         ][: self.arm_num_dofs]
 
+    def reset_arm_random(self) -> None:
+        for lower, upper, joint_id in zip(
+            self.arm_lower_limits, self.arm_upper_limits, self.arm_controllable_joints
+        ):
+            rand_joint_pose = random.uniform(lower, upper)
+            p.resetJointState(self.id, joint_id, rand_joint_pose)
+
+            # Wait for a few steps
+            for _ in range(10):
+                self.step_simulation()
+
+
     def reset_arm(self):
         """
         reset to rest poses
@@ -237,6 +244,8 @@ class KinovaRobotiq85Sim(KinovaRobotiq85):
                 force=self.joints[joint_id].maxForce * 100,
                 maxVelocity=self.joints[joint_id].maxVelocity,
             )
+        
+        return True
 
     def in_collision(self):
         return p.getContactPoints(self.id) != []
@@ -301,67 +310,3 @@ class KinovaRobotiq85Sim(KinovaRobotiq85):
             force=self.joints[self.mimic_parent_id].maxForce,
             maxVelocity=self.joints[self.mimic_parent_id].maxVelocity,
         )
-
-
-class KinovaRobotiq85Real(KinovaRobotiq85):
-    def __init__(self, base_pos, base_ori, use_gui=False):
-        super().__init__(base_pos, base_ori, use_gui)
-        rospy.init_node("kinova_robotiq_85_real", anonymous=True)
-        self.__init_robot__()
-
-    def __init_robot__(self):
-        # create action client for gripper
-        self.gripper_client = actionlib.SimpleActionClient(
-            "/my_gen3/robotiq_2f_85_gripper_controller/gripper_cmd",
-            GripperCommandAction,
-        )
-        self.gripper_client.wait_for_server()
-        rospy.loginfo("Gripper action server connected")
-
-        # setting up moveit interface
-        self.moveit_robotcommander = RobotCommander()
-        self.moveit_scene = PlanningSceneInterface()
-        self.group_name = "arm"
-        self.moveit_group = MoveGroupCommander(self.group_name)
-        self.display_trajectory_publisher = rospy.Publisher(
-            "/move_group/display_planned_path",
-            DisplayTrajectory,
-            queue_size=20,
-        )
-
-    def joint_state_callback(self, msg):
-        self.joint_state = msg
-
-    def load(self):
-        pass  # don't need to do anything here: no sim to load
-
-    def step_simulation(self):
-        pass  # don't actually need to do anything here: no sim to step
-
-    def in_collision(self):
-        pass  # TODO
-
-    def violates_limits(self, target_joint_positions):
-        pass  # TODO
-
-    def move_gripper(self, open_length):
-        close_gripper_goal = GripperCommandGoal()
-        close_gripper_goal.command.position = open_length
-        close_gripper_goal.command.max_effort = 100
-        self.gripper_client.send_goal(close_gripper_goal)
-        self.gripper_client.wait_for_result()
-
-    def get_joint_states(self) -> List[float]:
-        joints = self.moveit_robotcommander.get_current_state().joint_state
-        returnme = []
-        for n in range(7):
-            returnme.append(joints.position[n])
-        return returnme
-
-    def goto_joint_states(self, target_joint_positions: List[float]):
-        joint_state = self.get_joint_states()
-        for i in range(len(target_joint_positions)):
-            joint_state[i] = target_joint_positions[i]
-
-        self.moveit_group.go(joint_state, wait=True)
-        self.moveit_group.stop()

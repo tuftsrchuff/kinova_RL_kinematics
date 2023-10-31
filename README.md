@@ -1,50 +1,8 @@
-# Gym-Styled Kinova arm with Robotiq 2f85 gripper
+# Gym-Styled Kinova arm with Robotiq UR5 gripper
 
 Originally forked off of
 [ElectronicElephant's UR5 package](https://github.com/ElectronicElephant/pybullet_ur5_robotiq)
 ,heavily adapted for my own purposes.
 
-*Probably the best one among all GitHub repos.*
-
-This repo is under active development. Issues / PRs are welcomed.
-
-![User Control Demo](https://raw.githubusercontent.com/ElectronicElephant/pybullet_ur5_robotiq/main/example.png)
-
-## Highlights
-
-- UR5 arm with end-effector 6D IK (Position [X Y Z] and Orientation [R P Y])
-- Enhanced Robotiq-85 / 140 gripper, with precise position control and experimental torque control
-- Built-in YCB models loader (and obj models after decomposition)
-- Gym-styled API, making it suitable for Reinforcement Learning in the field of push-and-grasp
-- A heuristic grasping demo
-- An interactive user-control demo
-
-## Prerequisite
-- Python 3
-- PyBullet
-
-## Run
-
-You can try this repo with the interactive user-control demo.
-```[Python]
-python main.py
-```
-
-You can change the XYZ and RPY of the gripper on the right panel.
-
-Press `Z` to close the gripper and `R` to open it.
-
-## Usage
-
-See `heuristic demo` in `main.py`.
-
-###  References
-https://github.com/matafela/pybullet_grasp_annotator_robotiq_85
-
-https://github.com/zswang666/pybullet-playground
-
-https://github.com/ros-industrial/robotiq
-
-https://github.com/Alchemist77/pybullet-ur5-equipped-with-robotiq-140
-
-I do not claim copyright for any model files under this repo.
+##Kinematic Model Of Kinova Arm
+This repository trains and tests the effectiveness of a Kinova arm performing a reach task with 4 different methods. The first two methods involve randomly resetting the arm configuration and reach location respectively with a PPO policy. The next method resets both the arm location and reach location randomly during during training with a PPO policy. The last method also uses a random arm and reach location but now uses a HER policy.

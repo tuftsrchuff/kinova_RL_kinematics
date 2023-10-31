@@ -14,13 +14,14 @@ from stable_baselines3.common.env_checker import check_env
 from stable_baselines3.common.callbacks import CheckpointCallback
 
 
+
 def run_on_task(model, env, deterministic=True):
-    obs, _ = env.reset()
+    obs = env.reset()
     while True:
         action, _ = model.predict(
             obs, deterministic=deterministic
         )  # ignoring states return val
-        obs, _, dones, _, _ = env.step(action)  # ignoring reward, info return val
+        obs, _, dones, _ = env.step(action)  # ignoring reward, info return val
         d = (
             dones if type(dones) is np.ndarray else np.asarray(dones)
         )  # ensure dones is a list
@@ -29,52 +30,50 @@ def run_on_task(model, env, deterministic=True):
             break
 
 
+
+
 def get_task(task_name, args):
-    if task_name == "go_to":
+    if task_name == "object_move":
+        return ObjectMoveTask(
+            "./urdf/objects/block.urdf", (0.25, 0, 0.25), (0, 0, 0, 1), args["robot"]
+        )
+    elif task_name == "go_to":
         return GoToTask(
             args["robot"].id, args["robot"].eef_id, (0.25, 0.25, 0.25), args["radius"]
         )
+    elif task_name == "close_gripper":
+        return CloseGripperTask(args["robot"])
     else:
         raise ValueError("Unknown task: {}".format(task_name))
 
+
 def learner():
-    seeds = [1, 2, 3, 4, 5]
     ycb_models = YCBModels(
         os.path.join("./data/ycb", "**", "textured-decmp.obj"),
     )
     camera = None
     robot = KinovaRobotiq85Sim((0, 0, 0), (0, 0, 0))
-    env = EmptyScene(robot, ycb_models, camera, vis=False)
     robot.construct_new_position_actions()
+    env = EmptyScene(robot, ycb_models, camera, vis=True)
+    env.SIMULATION_STEP_DELAY = 0
     target_task = get_task("go_to", {"robot": robot, "radius": 0.1})
     robot.reset_arm_random()
     env.set_task(target_task)
-    check_env(env)
+
+    model = PPO.load("./logs/Rand_both_model_mod_5_100000_steps.zip")
+
+    obs, _ = env.reset()
 
 
-    for i in seeds:
-        # Initialize the model
-        # model = model_class(
-        #     "MultiInputPolicy",
-        #     env,
-        #     replay_buffer_class=HerReplayBuffer,
-        #     # Parameters for HER
-        #     replay_buffer_kwargs=dict(
-        #         n_sampled_goal=4,
-        #         goal_selection_strategy=goal_selection_strategy,
-        #     ),
-        #     verbose=1,
-        # )
-        model = PPO("MultiInputPolicy", env, verbose=1, n_steps=50, batch_size=100, seed=i)
-        # Save a checkpoint every 5000 steps = 20 models per seed
-        prefix = f"Rand_arm_model_mod_{i}"
-        checkpoint_callback = CheckpointCallback(save_freq=5000, save_path='./logs/',
-                                            name_prefix=prefix)
-        model.set_env(env)
-
-        model.learn(total_timesteps=100000, callback=checkpoint_callback, progress_bar=True)
-        del model
-
+    #Use trained model to move arm
+    finished = False
+    while not finished:
+        action, _states = model.predict(obs, deterministic=True)
+        obs, rewards, dones, _, info = env.step(action)
+        print(action)
+        if dones == True:
+            print("Done!")
+            finished = True
     del env
     p.disconnect()
     print("\n\n\nDone")
