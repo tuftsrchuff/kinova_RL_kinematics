@@ -8,8 +8,11 @@ from env import EmptyScene
 from robot import KinovaRobotiq85Sim
 from task import GoToTask
 from utilities import YCBModels
+from stable_baselines.her import GoalSelectionStrategy, HERGoalEnvWrapper
+from stable_baselines.common.bit_flipping_env import BitFlippingEnv
 
-from stable_baselines3 import PPO
+from stable_baselines.deepq.policies import MlpPolicy
+from stable_baselines import DQN, PPO, HER
 from stable_baselines3.common.env_checker import check_env
 from stable_baselines3.common.callbacks import CheckpointCallback
 
@@ -51,21 +54,15 @@ def learner():
     env.set_task(target_task)
     check_env(env)
 
+    model_class = DQN
+    goal_selection_strategy = 'future'
 
     for i in seeds:
         # Initialize the model
-        # model = model_class(
-        #     "MultiInputPolicy",
-        #     env,
-        #     replay_buffer_class=HerReplayBuffer,
-        #     # Parameters for HER
-        #     replay_buffer_kwargs=dict(
-        #         n_sampled_goal=4,
-        #         goal_selection_strategy=goal_selection_strategy,
-        #     ),
-        #     verbose=1,
-        # )
-        model = PPO("MultiInputPolicy", env, verbose=1, n_steps=50, batch_size=100, seed=i)
+        # Wrap the model
+        model = HER('MlpPolicy', env, model_class, n_sampled_goal=4,goal_selection_strategy=goal_selection_strategy, verbose=1)
+
+        # model = PPO("MultiInputPolicy", env, verbose=1, n_steps=50, batch_size=100, seed=i)
         # Save a checkpoint every 5000 steps = 20 models per seed
         prefix = f"Rand_arm_model_mod_{i}"
         checkpoint_callback = CheckpointCallback(save_freq=5000, save_path='./logs/',
